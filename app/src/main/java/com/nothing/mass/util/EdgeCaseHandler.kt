@@ -14,7 +14,6 @@ object EdgeCaseHandler {
                 dailyLimit = prefs.getFloat("daily_limit", 480f),
                 state = MassState.valueOf(prefs.getString("state", "LIGHT")!!),
                 percentageFilled = prefs.getFloat("percentage", 0f),
-                activeDots = prefs.getInt("active_dots", 0),
                 timestamp = prefs.getLong("timestamp", System.currentTimeMillis())
             )
         } else {
@@ -29,7 +28,6 @@ object EdgeCaseHandler {
             .putFloat("daily_limit", massData.dailyLimit)
             .putString("state", massData.state.name)
             .putFloat("percentage", massData.percentageFilled)
-            .putInt("active_dots", massData.activeDots)
             .putLong("timestamp", massData.timestamp)
             .apply()
     }

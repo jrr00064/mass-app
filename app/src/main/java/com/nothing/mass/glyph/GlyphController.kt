@@ -2,59 +2,85 @@
 package com.nothing.mass.glyph
 
 import android.content.Context
-import com.nothing.ketchum.Common
-import com.nothing.ketchum.GlyphException
-import com.nothing.ketchum.GlyphFrame
-import com.nothing.ketchum.GlyphManager
+import android.content.ComponentName
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import com.nothing.ketchum.Glyph
+import com.nothing.ketchum.GlyphMatrixManager
+import com.nothing.ketchum.GlyphMatrixFrame
+import com.nothing.ketchum.GlyphMatrixObject
 import com.nothing.mass.core.MassData
 import com.nothing.mass.core.MassState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.math.roundToInt
-import kotlin.math.pow
+import kotlin.math.min
 
+/**
+ * Controls GlyphMatrix rendering based on mass data using the Nothing Phone 3 (25x25) API
+ */
 class GlyphController(
     private val context: Context
 ) {
-    private var glyphManager: GlyphManager? = null
+    private var glyphManager: GlyphMatrixManager? = null
+    private var callback: GlyphMatrixManager.Callback? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var currentDotCount = 0
-    private var currentBrightness = 0f
+    private var currentFillPercentage = 0f
     private var isAnimating = false
+    private var isInitialized = false
 
+    /**
+     * Initialize GlyphMatrix interface
+     */
     fun initialize(): Boolean {
         return try {
-            glyphManager = GlyphManager.getInstance(context)
-            glyphManager?.init { callback ->
-                if (callback == null) {
-                    true
-                } else {
-                    false
+            glyphManager = GlyphMatrixManager.getInstance(context)
+            callback = object : GlyphMatrixManager.Callback {
+                override fun onServiceConnected(componentName: ComponentName) {
+                    glyphManager?.register(Glyph.DEVICE_23112) // Phone 3
+                    isInitialized = true
                 }
-            } ?: false
-        } catch (e: GlyphException) {
+
+                override fun onServiceDisconnected(componentName: ComponentName) {
+                    isInitialized = false
+                }
+            }
+            glyphManager?.init(callback)
+            true
+        } catch (e: Exception) {
             false
         }
     }
 
+    /**
+     * Observe mass data and update glyph accordingly
+     */
     fun observeMassData(massDataFlow: StateFlow<MassData>) {
         scope.launch {
             massDataFlow.collect { massData ->
-                updateGlyph(massData)
+                if (isInitialized) {
+                    updateGlyph(massData)
+                }
             }
         }
     }
 
+    /**
+     * Update glyph matrix based on mass data
+     */
     private suspend fun updateGlyph(massData: MassData) {
         if (isAnimating) return
         withContext(Dispatchers.Main) {
             isAnimating = true
             try {
                 animateToState(
-                    targetDots = massData.activeDots,
+                    targetPercentage = massData.percentageFilled,
                     targetBrightness = massData.state.brightness,
                     state = massData.state
                 )
+
+                // Start pulse animation if critical
                 if (massData.state == MassState.CRITICAL && massData.isAtLimit) {
                     startPulseAnimation()
                 }
@@ -64,68 +90,117 @@ class GlyphController(
         }
     }
 
+    /**
+     * Animate smooth transition between states
+     */
     private suspend fun animateToState(
-        targetDots: Int,
+        targetPercentage: Float,
         targetBrightness: Float,
         state: MassState
     ) {
-        val frameDuration = 50L
+        val frameDuration = 50L // 20 FPS
         val totalDuration = 500L
         val frames = (totalDuration / frameDuration).toInt()
-        val startDots = currentDotCount
-        val startBrightness = currentBrightness
+        val startPercentage = currentFillPercentage
+
         for (frame in 0..frames) {
             val progress = frame.toFloat() / frames
             val easedProgress = easeInOutCubic(progress)
-            val dots = (startDots + (targetDots - startDots) * easedProgress).roundToInt()
-            val brightness = startBrightness + (targetBrightness - startBrightness) * easedProgress
-            renderDotMatrix(dots, brightness)
+            val percentage = startPercentage + (targetPercentage - startPercentage) * easedProgress
+            val brightness = if (frame == 0) targetBrightness else targetBrightness
+
+            renderMatrixFill(percentage, brightness)
             delay(frameDuration)
         }
-        currentDotCount = targetDots
-        currentBrightness = targetBrightness
+
+        currentFillPercentage = targetPercentage
     }
 
-    private fun renderDotMatrix(activeDots: Int, brightness: Float) {
+    /**
+     * Render the 25x25 matrix with circular fill pattern
+     */
+    private fun renderMatrixFill(percentage: Float, brightness: Float) {
         try {
-            val glyphFrame = GlyphManager.getInstance(context).glyphFrameBuilder
-            val intensity = (brightness * 4095).toInt()
-            val dotPattern = generateSpiralPattern(TOTAL_DOTS)
-            for (i in 0 until TOTAL_DOTS) {
-                val dotIndex = dotPattern[i]
-                val dotIntensity = if (i < activeDots) intensity else 0
-                glyphFrame.buildChannel(dotIndex, dotIntensity)
-            }
-            glyphFrame.build()
-            glyphManager?.toggle(glyphFrame.frame)
-        } catch (e: GlyphException) {
-            // Handle glyph errors silently
+            val frameBuilder = GlyphMatrixFrame.Builder()
+
+            // Create a bitmap representing the fill pattern
+            val fillBitmap = createFillBitmap(percentage, brightness)
+
+            // Create glyph object from bitmap
+            val glyphObject = GlyphMatrixObject.Builder()
+                .setImageSource(fillBitmap)
+                .setPosition(0, 0)
+                .setScale(100)
+                .setOrientation(0)
+                .setBrightness((brightness * 255).toInt())
+                .build()
+
+            // Add to frame and display
+            frameBuilder.addTop(glyphObject)
+            val frame = frameBuilder.build(context)
+
+            glyphManager?.setMatrixFrame(frame.render())
+        } catch (e: Exception) {
+            // Handle errors silently
         }
     }
 
-    private fun generateSpiralPattern(totalDots: Int): IntArray {
-        return intArrayOf(
-            16,
-            15, 17, 14, 18, 13, 19, 12, 20,
-            11, 21, 10, 22, 9, 23, 8, 24,
-            7, 25, 6, 26, 5, 27, 4, 28,
-            3, 29, 2, 30, 1, 31, 0, 32
-        )
+    /**
+     * Create a 25x25 bitmap with circular fill pattern
+     * Fills from center outward based on percentage
+     */
+    private fun createFillBitmap(percentage: Float, brightness: Float): Bitmap {
+        val size = 25
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint().apply {
+            isAntiAlias = false
+        }
+
+        val centerX = size / 2f
+        val centerY = size / 2f
+        val maxRadius = size / 2f
+
+        // Calculate fill radius based on percentage
+        val fillRadius = maxRadius * percentage
+
+        // Draw filled area
+        val intensity = (brightness * 255).toInt()
+        val color = Color.rgb(intensity, intensity, intensity)
+
+        for (y in 0 until size) {
+            for (x in 0 until size) {
+                val distance = kotlin.math.hypot(x - centerX, y - centerY)
+                if (distance <= fillRadius) {
+                    bitmap.setPixel(x, y, color)
+                } else {
+                    bitmap.setPixel(x, y, Color.BLACK)
+                }
+            }
+        }
+
+        return bitmap
     }
 
+    /**
+     * Critical state pulse animation
+     */
     private suspend fun startPulseAnimation() {
         scope.launch {
             repeat(3) {
                 for (i in 0..10) {
                     val progress = i / 10f
-                    val brightness = 0.7f + 0.3f * kotlin.math.sin(progress * Math.PI).toFloat()
-                    renderDotMatrix(TOTAL_DOTS, brightness)
+                    val pulseBrightness = 0.7f + 0.3f * kotlin.math.sin(progress * Math.PI).toFloat()
+                    renderMatrixFill(1.0f, pulseBrightness)
                     delay(80)
                 }
             }
         }
     }
 
+    /**
+     * Cubic easing function for smooth animations
+     */
     private fun easeInOutCubic(t: Float): Float {
         return if (t < 0.5f) {
             4 * t * t * t
@@ -134,26 +209,28 @@ class GlyphController(
         }
     }
 
+    /**
+     * Clear glyph display
+     */
     fun clear() {
         try {
             glyphManager?.turnOff()
-            currentDotCount = 0
-            currentBrightness = 0f
-        } catch (e: GlyphException) {
+            currentFillPercentage = 0f
+        } catch (e: Exception) {
             // Handle silently
         }
     }
 
+    /**
+     * Release resources
+     */
     fun release() {
         scope.cancel()
         try {
             glyphManager?.unInit()
-        } catch (e: GlyphException) {
+            isInitialized = false
+        } catch (e: Exception) {
             // Handle silently
         }
-    }
-
-    companion object {
-        const val TOTAL_DOTS = 33
     }
 }

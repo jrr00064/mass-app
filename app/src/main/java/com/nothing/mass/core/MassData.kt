@@ -11,7 +11,6 @@ data class MassData(
     val dailyLimit: Float = 480f,
     val state: MassState,
     val percentageFilled: Float,
-    val activeDots: Int,
     val timestamp: Long = System.currentTimeMillis()
 ) {
     val isAtLimit: Boolean
@@ -22,8 +21,7 @@ data class MassData(
             currentMass = 0f,
             dailyLimit = 480f,
             state = MassState.LIGHT,
-            percentageFilled = 0f,
-            activeDots = 0
+            percentageFilled = 0f
         )
     }
 }

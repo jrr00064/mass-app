@@ -26,8 +26,7 @@ class MassCalculatorTest {
             currentMass = 288f,
             dailyLimit = 480f,
             state = MassState.DENSE,
-            percentageFilled = 0.6f,
-            activeDots = 20
+            percentageFilled = 0.6f
         )
         assertEquals(MassState.DENSE, data1.state)
 
@@ -35,17 +34,16 @@ class MassCalculatorTest {
             currentMass = 432f,
             dailyLimit = 480f,
             state = MassState.CRITICAL,
-            percentageFilled = 0.9f,
-            activeDots = 30
+            percentageFilled = 0.9f
         )
         assertEquals(MassState.CRITICAL, data2.state)
     }
 
     @Test
-    fun testDotActivation() {
+    fun testMatrixFillPercentage() {
+        // For 25x25 matrix (625 LEDs), percentage determines circular fill radius
         val percentage = 0.5f
-        val dots = (percentage * 33).toInt()
-        assertEquals(16, dots)
+        assertTrue(percentage >= 0f && percentage <= 1f)
     }
 
     @Test

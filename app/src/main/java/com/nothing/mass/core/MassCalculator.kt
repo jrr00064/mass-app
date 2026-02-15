@@ -41,13 +41,13 @@ class MassCalculator(
             }
             val percentage = min(totalMass / dailyLimit, 1.0f)
             val state = MassState.fromPercentage(percentage)
-            val activeDots = (percentage * TOTAL_DOTS).toInt()
+            // For 25x25 matrix (625 LEDs), we use percentage directly
+            // The visual fill is handled by the GlyphController creating a circular fill pattern
             MassData(
                 currentMass = totalMass,
                 dailyLimit = dailyLimit,
                 state = state,
-                percentageFilled = percentage,
-                activeDots = activeDots
+                percentageFilled = percentage
             )
         }
     }
@@ -104,7 +104,4 @@ class MassCalculator(
         scope.cancel()
     }
 
-    companion object {
-        const val TOTAL_DOTS = 33
-    }
 }
